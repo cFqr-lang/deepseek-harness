@@ -17,7 +17,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ToolDefinition, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition, ToolExecution, ToolOutputDefinition } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode, JsonValue } from '@deepseek-ai/dsh-tools'
 
@@ -27,6 +27,7 @@ export interface ToolBridgeOptions {
   registrationFailure: 'contain' | 'throw'
   serverName: string
   toolCallTimeoutMs: number
+  connectTimeoutMs: number
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
@@ -54,10 +55,11 @@ const HASH_LENGTH = 12
 const RawCallToolResultSchema = z.record(z.string(), z.unknown())
 
 /** List without mutating the SDK's per-page output-validator cache. */
-function listToolsUncached(client: Client, cursor?: string) {
+function listToolsUncached(client: Client, timeout: number, cursor?: string) {
   return client.request(
     { method: 'tools/list', ...cursor === undefined ? {} : { params: { cursor } } },
     ListToolsResultSchema,
+    { timeout },
   )
 }
 
@@ -133,9 +135,16 @@ export async function syncTools(
 ): Promise<ToolDisposers> {
   // Phase 1: fetch and build the next generation without touching the registry.
   const definitions = new Map<string, ToolDefinition>()
+  // Static resource-access tools register only when the server advertises the
+  // resources capability; they list/read at call time, so no re-sync here.
+  if (client.getServerCapabilities()?.resources !== undefined) {
+    for (const [name, definition] of resourceToolDefinitions(client, opts)) {
+      definitions.set(name, definition)
+    }
+  }
   let cursor: string | undefined
   do {
-    const response = await listToolsUncached(client, cursor)
+    const response = await listToolsUncached(client, opts.connectTimeoutMs, cursor)
     for (const tool of response.tools) {
       const publicName = publicToolName(opts.serverName, tool.name)
       if (definitions.has(publicName)) {
@@ -183,6 +192,75 @@ interface McpContentBlock {
   type: string
   text?: string
   mimeType?: string
+}
+
+/** Shared loose output for the resource tools: canonical object, pretty-JSON render. */
+const RESOURCE_OUTPUT: ToolOutputDefinition = {
+  schema: { type: 'object', additionalProperties: true },
+  render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+}
+
+/**
+ * The two static resource-access tools for one server. They are NOT discovered
+ * like tools — they always exist when the server advertises the `resources`
+ * capability — and they list/read at call time, so there is no discovery
+ * re-sync to maintain. Their public names use the same server-qualified
+ * `mcp__<server>__<rawName>` contract as discovered tools.
+ * @param client - Connected MCP Client used to list and read resources.
+ * @param opts - Bridge options: server namespace and per-call timeout.
+ * @returns `[publicName, definition]` pairs for `list_resources` and `read_resource`.
+ */
+function resourceToolDefinitions(client: Client, opts: ToolBridgeOptions): Array<[string, ToolDefinition]> {
+  const listName = publicToolName(opts.serverName, 'list_resources')
+  const readName = publicToolName(opts.serverName, 'read_resource')
+  const requestOptions = (exec: ToolExecution): { signal: AbortSignal; timeout: number } =>
+    ({ signal: exec.signal, timeout: opts.toolCallTimeoutMs })
+  return [
+    [listName, {
+      name: listName,
+      description: `List the read-only resources this MCP server (${opts.serverName}) exposes, with their URIs.`,
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      output: RESOURCE_OUTPUT,
+      execute: async (_args, exec) => {
+        const resources: unknown[] = []
+        let cursor: string | undefined
+        do {
+          const response = await client.listResources(
+            cursor === undefined ? {} : { cursor },
+            requestOptions(exec),
+          )
+          resources.push(...response.resources)
+          cursor = response.nextCursor
+        } while (cursor !== undefined)
+        return { resources }
+      },
+    }],
+    [readName, {
+      name: readName,
+      description: `Read one resource (by URI) exposed by this MCP server (${opts.serverName}); returns its text or base64 blob contents.`,
+      parameters: {
+        type: 'object',
+        properties: { uri: { type: 'string', description: 'The resource URI to read.' } },
+        required: ['uri'],
+        additionalProperties: false,
+      },
+      output: RESOURCE_OUTPUT,
+      execute: async (args, exec) => {
+        const { uri } = (args ?? {}) as { uri?: unknown }
+        if (typeof uri !== 'string' || uri.length === 0) {
+          throw new Error('read_resource requires a non-empty "uri" string argument')
+        }
+        const response = await client.readResource({ uri }, requestOptions(exec))
+        const contents = response.contents.map(content => ({
+          uri: content.uri,
+          ...content.mimeType !== undefined ? { mimeType: content.mimeType } : {},
+          ...'text' in content ? { text: content.text } : {},
+          ...'blob' in content ? { blob: content.blob } : {},
+        }))
+        return { contents }
+      },
+    }],
+  ]
 }
 
 /** Keep a supported advertised schema; unsupported MCP vocabulary falls back to JsonValue. */

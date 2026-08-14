@@ -7,9 +7,6 @@
   "include": ["src"],
   "references": [
     {
-      "path": "../../../vendor/cosmokit"
-    },
-    {
       "path": "../../../vendor/cordis"
     },
     {
@@ -19,19 +16,16 @@
       "path": "../../llm/llm"
     },
     {
-      "path": "../../core/tools"
+      "path": "../../memory/memory"
     },
     {
-      "path": "../../interaction/commands"
+      "path": "../../skill/skill-learn"
     },
     {
-      "path": "../../subprocess/subprocess"
+      "path": "../../core/agent"
     },
     {
-      "path": "../../runtime-diagnostics/invariants"
-    },
-    {
-      "path": "../../util/timeout"
+      "path": "../../core/session"
     }
   ]
 }

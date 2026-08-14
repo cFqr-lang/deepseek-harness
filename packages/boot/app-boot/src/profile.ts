@@ -22,9 +22,10 @@
  * @module @deepseek-ai/dsh-app-boot/profile
  */
 
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -101,10 +102,16 @@ export interface Profile {
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  * @returns the absolute profile directory (which may not exist yet).
  */
+/** Windows-reserved device names (case-insensitive); invalid as a directory name. */
+const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
 export function resolveProfileDir(name: string, home: string = resolveDshHome()): string {
   if (name === '' || name.includes('/') || name.includes('\\') || name === '.' || name === '..'
     // The launcher-maintained flat module fallback lives at this sibling path.
-    || name === 'node_modules') {
+    || name === 'node_modules'
+    // Windows-invalid filename characters, trailing dot/space, and reserved device names.
+    || /[<>:"|?*]/.test(name) || name.endsWith('.') || name.endsWith(' ')
+    || WINDOWS_RESERVED_NAMES.test(name) || WINDOWS_RESERVED_NAMES.test(name.split('.')[0] ?? '')) {
     throw new Error(`dsh: invalid profile name ${JSON.stringify(name)}`)
   }
   return join(home, PROFILES_DIR, name)
@@ -169,6 +176,10 @@ export function initProfile(dir: string, bundles: readonly string[]): void {
 
 /** Ensure `link` is a symlink to `target`, replacing a wrong or dangling link; a real directory throws. */
 function ensureSymlink(link: string, target: string): void {
+  // pnpm nests some packages under other (symlinked) packages; a junction
+  // through that chain fails on Windows (EBUSY), so resolve the target to its
+  // real directory first — the caller already proved it exists.
+  const realTarget = realpathSync(target)
   let stat
   try {
     stat = lstatSync(link)
@@ -181,21 +192,32 @@ function ensureSymlink(link: string, target: string): void {
     if (!stat.isSymbolicLink()) {
       throw new Error(`dsh: ${link} exists and is not a symlink; remove it so dsh can manage the installation fallback`)
     }
-    if (readlinkSync(link) === target) return
+    if (readlinkSync(link) === realTarget) return
     // unlink deletes the reparse point itself on Windows too; rmSync treats a
     // junction as a directory and throws EISDIR unless recursive.
     unlinkSync(link)
   }
   try {
-    symlinkSync(target, link, 'junction')
+    symlinkSync(realTarget, link, 'junction')
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    // A filesystem without reparse-point support (exFAT/FAT32, some network
+    // mounts) cannot create junctions at all; the raw EISDIR/ENOTSUP is
+    // useless to a user, so say what to actually do about it.
+    if (code === 'EISDIR' || code === 'ENOTSUP' || code === 'EPERM') {
+      throw new Error(
+        `dsh: cannot create the profile module fallback symlink at ${link} (${code}). ` +
+        'The Harness home ($DSH_HOME) is on a filesystem that does not support junctions ' +
+        '(e.g. exFAT). Move $DSH_HOME to an NTFS drive and retry.',
+      )
+    }
     // Concurrent launches heal the same fallback; losing the race to a
     // process writing the identical link is success, anything else is not.
     // The window between the lstat miss above and this write cannot be
     // staged deterministically from the public API.
     /* v8 ignore next 4 */
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST'
-      || !lstatSync(link).isSymbolicLink() || readlinkSync(link) !== target) {
+    if (code !== 'EEXIST'
+      || !lstatSync(link).isSymbolicLink() || readlinkSync(link) !== realTarget) {
       throw error
     }
   }
@@ -223,8 +245,34 @@ function ensureSymlink(link: string, target: string): void {
 export function healProfilesModuleFallback(installAnchor: string, home: string = resolveDshHome()): void {
   const profilesDir = join(home, PROFILES_DIR)
   const modulesDir = join(profilesDir, 'node_modules')
-  mkdirSync(modulesDir, { recursive: true })
-  const appManifest = JSON.parse(readFileSync(installAnchor, 'utf8')) as ProfileManifest
+  const appManifestRaw = readFileSync(installAnchor, 'utf8')
+  const appManifest = JSON.parse(appManifestRaw) as ProfileManifest
+  const markerPath = join(profilesDir, '.fallback-marker')
+  const hash = createHash('sha256').update(appManifestRaw)
+  // The closure can change when a DIRECT dependency adds or removes a
+  // dependency even though the app manifest is untouched, so fold each direct
+  // dep's manifest into the fingerprint.
+  for (const dep of [...Object.keys(appManifest.dependencies ?? {}), ...Object.keys(appManifest.peerDependencies ?? {})]) {
+    const dir = packageDirFromAnchor(installAnchor, dep)
+    if (dir !== undefined) hash.update(readFileSync(join(dir, 'package.json'), 'utf8'))
+  }
+  const fingerprint = hash.digest('hex')
+  // Skip the O(deps) BFS and O(links) symlink verification when the install
+  // is unchanged and the fallback is already in place. The sentinel re-checks
+  // the app's own link so a manually wiped fallback still heals.
+  if (existsSync(markerPath) && readFileSync(markerPath, 'utf8').trim() === fingerprint
+    && (appManifest.name === undefined || existsSync(join(modulesDir, appManifest.name)))) {
+    return
+  }
+  try {
+    mkdirSync(modulesDir, { recursive: true })
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EPERM' || code === 'EACCES' || code === 'ENOENT' || code === 'ENOTDIR') {
+      throw new Error(`dsh: cannot create the Harness home data directory ${modulesDir} (${code}); check that $DSH_HOME points to a writable location`)
+    }
+    throw error
+  }
   const links = new Map<string, string>()
   /* v8 ignore next -- a real app manifest always declares its name */
   if (appManifest.name !== undefined) links.set(appManifest.name, dirname(installAnchor))
@@ -252,6 +300,7 @@ export function healProfilesModuleFallback(installAnchor: string, home: string =
     mkdirSync(dirname(link), { recursive: true })
     ensureSymlink(link, target)
   }
+  writeFileSync(markerPath, fingerprint + '\n')
 }
 
 /**
@@ -269,7 +318,12 @@ export function readProfileManifest(binName: string, dir: string): ProfileManife
     throw new Error(`${binName}: failed to read profile manifest ${path}: ${String(error)}`)
   }
   // The field checks below validate the file data before trusting the parse type.
-  const parsed = JSON.parse(raw) as ProfileManifest | null
+  let parsed: ProfileManifest | null
+  try {
+    parsed = JSON.parse(raw) as ProfileManifest | null
+  } catch (error) {
+    throw new Error(`${binName}: profile manifest ${path} is not valid JSON: ${String(error)}`)
+  }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`${binName}: profile manifest ${path} must hold a JSON object`)
   }
@@ -387,7 +441,12 @@ export function loadProfile(
   const bundles = manifest.dsh?.profile?.bundles ?? []
   const layers = bundles.map((packageName): ProfileLayer => {
     const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
-    const bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
+    let bundleManifest: ProfileManifest
+    try {
+      bundleManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
+    } catch (error) {
+      throw new Error(`${binName}: failed to read or parse bundle manifest for ${JSON.stringify(packageName)} (${join(packageDir, 'package.json')}): ${String(error)}`)
+    }
     const declared = bundleManifest.dsh?.bundle?.patch
     if (declared === undefined) {
       throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)

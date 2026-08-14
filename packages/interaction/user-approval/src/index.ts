@@ -13,6 +13,7 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-commands'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -69,6 +70,17 @@ declare module '@deepseek-ai/dsh-session/types' {
       /** Marks an override seeded into a child at delegation. */
       source?: 'delegation'
     }
+    /**
+     * A persistent per-(tool, reason) approval rule was set or revoked —
+     * log-only, durable, replayable. A later `'revoke'` cancels an earlier
+     * `'allowed-always'` for the same tool and reason. The fold over these
+     * events is the session's effective rule set ({@link effectiveApprovalRules}).
+     */
+    'approval/rule': {
+      toolName: string
+      reason?: string
+      action: 'allowed-always' | 'revoke'
+    }
   }
 }
 
@@ -79,7 +91,7 @@ export { ApprovalRequestId } from './types.ts'
 export type { ApprovalOutcome } from './types.ts'
 
 /** Every {@link ApprovalOutcome}, for runtime normalization of answerer returns. */
-const OUTCOMES: readonly ApprovalOutcome[] = ['allowed-once', 'rejected', 'cancelled', 'unavailable']
+const OUTCOMES: readonly ApprovalOutcome[] = ['allowed-once', 'allowed-always', 'rejected', 'cancelled', 'unavailable']
 
 /**
  * A session's approval policy — what happens to an {@link ApprovalService}
@@ -144,6 +156,71 @@ export function setApprovalPolicy(session: Session, policy: ApprovalPolicy): voi
     throw new TypeError('approval policy must be one of "ask" or "never"')
   }
   session.append('approval/policy', { policy })
+}
+
+/** The durable key for one (tool, reason) approval rule. */
+function ruleKey(toolName: string, reason: string | undefined): string {
+  return JSON.stringify([toolName, reason ?? ''])
+}
+
+/**
+ * The session's effective allow-always rule set: a fold over the log's
+ * `approval/rule` events, where a later `'revoke'` cancels an earlier
+ * `'allowed-always'` for the same (tool, reason) key.
+ * @param events - session events in log order (other event types are skipped).
+ * @returns the set of currently-allowed (tool, reason) keys.
+ */
+export function effectiveApprovalRules(events: readonly SessionEvent[]): ReadonlySet<string> {
+  const rules = new Set<string>()
+  for (const event of events) {
+    if (event.type === 'approval/rule') {
+      const key = ruleKey(event.data.toolName, event.data.reason)
+      if (event.data.action === 'allowed-always') rules.add(key)
+      else rules.delete(key)
+    }
+  }
+  return rules
+}
+
+/** One active allow-always approval rule (tool + exact reason). */
+export interface ApprovalRule {
+  toolName: string
+  reason: string | undefined
+}
+
+/**
+ * The session's active allow-always rules in log order — the ordered form of
+ * {@link effectiveApprovalRules}, for listing and revocation. A later
+ * `'revoke'` removes the earlier `'allowed-always'` for the same (tool, reason).
+ * @param events - session events in log order.
+ * @returns the currently-active rules, earliest first.
+ */
+export function listApprovalRules(events: readonly SessionEvent[]): ApprovalRule[] {
+  const rules = new Map<string, ApprovalRule>()
+  for (const event of events) {
+    if (event.type === 'approval/rule') {
+      const key = ruleKey(event.data.toolName, event.data.reason)
+      if (event.data.action === 'allowed-always') rules.set(key, { toolName: event.data.toolName, reason: event.data.reason })
+      else rules.delete(key)
+    }
+  }
+  return [...rules.values()]
+}
+
+/**
+ * Append a durable approval-rule change. `'allowed-always'` auto-approves future
+ * requests with the exact same tool and reason; `'revoke'` cancels it.
+ * @param session - the session the rule belongs to.
+ * @param toolName - the tool the rule is about.
+ * @param reason - the exact reason to match (undefined matches reason-less asks).
+ * @param action - grant or revoke.
+ */
+export function setApprovalRule(session: Session, toolName: string, reason: string | undefined, action: 'allowed-always' | 'revoke'): void {
+  session.append('approval/rule', {
+    toolName,
+    ...reason !== undefined ? { reason } : {},
+    action,
+  })
 }
 
 /**
@@ -211,6 +288,35 @@ export class ApprovalService extends Service {
           if (agent === undefined) return ''
           const policy = effective(agent)
           return policy === 'never' ? NEVER_SENTENCE : ASK_SENTENCE
+        },
+      })
+    })
+
+    // The /approval-rules command: lists active allow-always rules and revokes
+    // one by index. The child activates only when a command registry is composed.
+    ctx.inject(['commands'], (commandCtx) => {
+      commandCtx.commands.register({
+        name: 'approval-rules',
+        description: 'list or revoke "always allow" approval rules',
+        input: { hint: '[revoke <n>]' },
+        handler: ({ agent, rawInput }) => {
+          const rules = listApprovalRules(agent.session.events)
+          const input = rawInput.trim()
+          if (input === '') {
+            if (rules.length === 0) return { kind: 'success', text: 'No "always allow" approval rules are active.' }
+            return { kind: 'success', text: rules.map((rule, index) =>
+              `${index + 1}. ${rule.toolName}${rule.reason === undefined ? '' : ` — ${rule.reason}`}`).join('\n') }
+          }
+          const match = /^revoke\s+(\d+)$/.exec(input)
+          if (match === null) {
+            return { kind: 'error', text: 'Usage: /approval-rules   or   /approval-rules revoke <n>' }
+          }
+          const rule = rules[Number(match[1]) - 1]
+          if (rule === undefined) {
+            return { kind: 'error', text: `No active rule at index ${match[1]}; run /approval-rules to list them.` }
+          }
+          setApprovalRule(agent.session, rule.toolName, rule.reason, 'revoke')
+          return { kind: 'success', text: `Revoked "always allow" for ${rule.toolName}${rule.reason === undefined ? '' : ` — ${rule.reason}`}` }
         },
       })
     })
@@ -310,6 +416,9 @@ export class ApprovalService extends Service {
     // documented promise that 'never' rejects deterministically regardless
     // of registration order — only the service's own request path can.
     if (this.effectivePolicy(session) === 'never') return 'rejected'
+    // A persistent allow-always rule for this exact (tool, reason) answers
+    // without prompting; the audit pair still records the decision.
+    if (effectiveApprovalRules(session.events).has(ruleKey(req.toolName, req.reason))) return 'allowed-always'
     // Enter the promise chain BEFORE dispatching: a listener that throws
     // SYNCHRONOUSLY (before its first await) must land in the same rejection
     // path as an async one — `Promise.resolve(call())` would let it escape
@@ -322,7 +431,15 @@ export class ApprovalService extends Service {
     ).then(
       // Normalize a rogue (non-vocabulary) answerer return to the fail-closed
       // outcome instead of leaking it into callers' closed-union switches.
-      outcome => OUTCOMES.includes(outcome) ? outcome : 'unavailable',
+      // An 'allowed-always' grant also persists the (tool, reason) rule so
+      // future identical asks answer without prompting.
+      (outcome) => {
+        const normalized = OUTCOMES.includes(outcome) ? outcome : 'unavailable'
+        if (normalized === 'allowed-always') {
+          setApprovalRule(session, req.toolName, req.reason, 'allowed-always')
+        }
+        return normalized
+      },
       // A throwing answerer must fail the QUESTION closed, not the caller's
       // tool call open — the seam contains its callbacks.
       () => 'unavailable',

@@ -7,31 +7,25 @@
   "include": ["src"],
   "references": [
     {
-      "path": "../../../vendor/cosmokit"
-    },
-    {
       "path": "../../../vendor/cordis"
     },
     {
       "path": "../../../vendor/schemastery"
     },
     {
+      "path": "../../util/home-paths"
+    },
+    {
       "path": "../../llm/llm"
     },
     {
-      "path": "../../core/tools"
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/session"
     },
     {
       "path": "../../interaction/commands"
-    },
-    {
-      "path": "../../subprocess/subprocess"
-    },
-    {
-      "path": "../../runtime-diagnostics/invariants"
-    },
-    {
-      "path": "../../util/timeout"
     }
   ]
 }

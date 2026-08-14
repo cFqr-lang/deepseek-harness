@@ -51,6 +51,7 @@ function createMockClient(tools: MockTool[], callResult: MockCallResult = { cont
     setNotificationHandler: vi.fn(),
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
+    getServerCapabilities: () => undefined,
   }
 }
 
@@ -67,6 +68,7 @@ const defaultOpts: ToolBridgeOptions = {
   registrationFailure: 'contain',
   serverName: 'srv',
   toolCallTimeoutMs: 60_000,
+  connectTimeoutMs: 60_000,
 }
 
 // ---- Tests ----
@@ -713,6 +715,7 @@ describe('createTransport', () => {
       env: {},
       cwd: '/tmp',
       toolCallTimeoutMs: 60_000,
+      connectTimeoutMs: 60_000,
       failOnStartupError: false,
     }
     const transport = createTransport(config)
@@ -728,6 +731,7 @@ describe('createTransport', () => {
       url: 'http://localhost:3000/mcp',
       headers: {},
       toolCallTimeoutMs: 60_000,
+      connectTimeoutMs: 60_000,
       failOnStartupError: false,
     }
     const transport = createTransport(config)
@@ -743,6 +747,7 @@ describe('createTransport', () => {
       url: 'http://localhost:3000/mcp',
       headers: { Authorization: 'Bearer token' },
       toolCallTimeoutMs: 60_000,
+      connectTimeoutMs: 60_000,
       failOnStartupError: false,
     }
     const transport = createTransport(config)
@@ -767,6 +772,7 @@ describe('createTransport', () => {
         env: { EXTRA: 'injected' },
         cwd: '',
         toolCallTimeoutMs: 60_000,
+        connectTimeoutMs: 60_000,
         failOnStartupError: false,
       }
       // StdioClientTransport keeps its env private; the observable contract is
@@ -793,6 +799,7 @@ describe('createTransport', () => {
       env: { CUSTOM: 'value' },
       cwd: '',
       toolCallTimeoutMs: 60_000,
+      connectTimeoutMs: 60_000,
       failOnStartupError: false,
     }
     const transport = createTransport(config)

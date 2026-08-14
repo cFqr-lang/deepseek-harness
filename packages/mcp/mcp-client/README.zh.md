@@ -44,6 +44,7 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 | `url` | http | 是 | MCP 服务器 URL |
 | `headers` | http | 否 | 额外标头（例如认证 token） |
 | `toolCallTimeoutMs` | 两者 | 否 | 每次 `callTool` 调用的超时（默认 60000） |
+| `connectTimeoutMs` | 两者 | 否 | 连接建立（initialize）与每次 `tools/list` 发现请求的超时（默认 60000） |
 | `failOnStartupError` | 两者 | 否 | 初始连接或工具同步失败时拒绝插件激活（默认 `false`） |
 | `reconnect.enabled` | 两者 | 否 | 连接丢失后自动重新连接（默认 `true`） |
 | `reconnect.initialDelayMs` | 两者 | 否 | 首次重连延迟（毫秒）；每次连续失败尝试翻倍（默认 500） |
@@ -74,7 +75,15 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 
 | 服务 | 用途 |
 |---|---|
-| `ctx.tools` | 注册／注销 MCP 工具 |
+| `ctx.tools` | 注册／注销 MCP 工具与资源访问工具 |
+| `ctx.commands` | 注册／注销 MCP 提示词命令（可选，仅当组合了命令适配器时） |
+
+## 资源与提示词
+
+除工具外，当服务器声明相应能力时，桥接还会映射服务器另外两种能力类型：
+
+- **资源** → 每个服务器两个只读工具，仅当服务器声明 `resources` 能力时注册：`mcp__<serverName>__list_resources`（列出资源 URI）与 `mcp__<serverName>__read_resource`（读取一个 URI，返回文本或 base64 blob）。它们在调用时列出／读取，因此无需维护资源重新同步。
+- **提示词** → 每个提示词一个斜杠命令，仅当服务器声明 `prompts` 能力且组合了命令适配器时注册：`/mcp-<serverName>-<promptName>`（小写化、清理）。该命令接受 JSON 参数（例如 `{"file":"src/index.ts"}`），通过 `prompts/get` 填充提示词，并将其文本作为下一轮注入模型。
 
 ## 模型体验
 
@@ -108,8 +117,6 @@ MCP 客户端桥接插件：连接外部 [Model Context Protocol](https://modelc
 
 ## 已知限制与暂缓事项
 
-- **只桥接 MCP 的工具能力**：资源和提示词没有 harness 消费接口，暂缓实现。
-- **启动超时继承自 MCP SDK**：DSH 尚未公开连接／发现超时。每次 initialize 请求或分页 `tools/list` 请求都使用 SDK 默认的 60 秒，因此在初始同步完成期间，无响应的 server 或 cursor chain 可能同时延迟激活与 teardown。
 - **重连在传输关闭时触发**：崩溃的 stdio 子进程会触发重连；Streamable HTTP 失败通过每次请求以及 SDK 传输自身的 SSE（Server-Sent Events）流恢复机制暴露，因此不可达的 HTTP 服务器会按调用重试，而非由 supervisor 重新 spawn。
 - **Native 非文本渲染有损**：图片、音频与资源载荷在模型上下文中会变成占位符，即使执行局部的规范值保留了其 JSON 块。更丰富的 Native 多媒体投影暂缓实现。
 - **不强制执行不受支持的 MCP 输出 schema**：已声明 schema 使用 harness 子集之外的词汇时，`structuredContent` 会回退到 `JsonValue`。

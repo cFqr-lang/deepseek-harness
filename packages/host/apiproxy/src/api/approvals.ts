@@ -17,5 +17,5 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 export interface ApprovalResponsePayload {
   sessionId: SessionId
   approvalId: ApprovalRequestId
-  outcome: 'allowed-once' | 'rejected'
+  outcome: 'allowed-once' | 'allowed-always' | 'rejected'
 }

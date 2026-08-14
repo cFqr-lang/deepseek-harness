@@ -234,11 +234,25 @@
       config:
         maxBytes: 65536
 
+    - id: memory
+      name: '@deepseek-ai/dsh-memory'
+
+    - id: cron
+      name: '@deepseek-ai/dsh-cron'
+
     - id: skill
       name: '@deepseek-ai/dsh-skill'
 
     - id: skill-filesystem
       name: '@deepseek-ai/dsh-skill-filesystem'
+
+    - id: skill-learn
+      name: '@deepseek-ai/dsh-skill-learn'
+
+    - id: curator
+      name: '@deepseek-ai/dsh-curator'
+      config:
+        idleMinutes: 30
 
     - id: skill-badge
       name: '@deepseek-ai/dsh-skill-badge'

@@ -44,6 +44,7 @@ The model sees `mcp__github__create_issue`, `mcp__web__search`, … — the same
 | `url` | http | yes | MCP server URL |
 | `headers` | http | no | Extra headers (e.g. auth tokens) |
 | `toolCallTimeoutMs` | both | no | Timeout per `callTool` invocation (default 60000) |
+| `connectTimeoutMs` | both | no | Timeout for connection establishment (initialize) and each `tools/list` discovery request (default 60000) |
 | `failOnStartupError` | both | no | Reject plugin activation when initial connection or tool synchronization fails (default `false`) |
 | `reconnect.enabled` | both | no | Reconnect automatically after a lost connection (default `true`) |
 | `reconnect.initialDelayMs` | both | no | First reconnect delay in ms; doubles per consecutive failed attempt (default 500) |
@@ -74,7 +75,15 @@ Every MCP tool has two names: the raw MCP name (sent on the wire in `tools/call`
 
 | Service | Usage |
 |---|---|
-| `ctx.tools` | Register/unregister MCP tools |
+| `ctx.tools` | Register/unregister MCP tools and resource-access tools |
+| `ctx.commands` | Register/unregister MCP prompt commands (optional; only when a command adapter is composed) |
+
+## Resources and Prompts
+
+Beyond tools, the bridge maps the server's other two capability kinds when the server advertises them:
+
+- **Resources** → two read-only tools per server, registered only when the server declares the `resources` capability: `mcp__<serverName>__list_resources` (lists resource URIs) and `mcp__<serverName>__read_resource` (reads one URI, returning text or base64 blob). They list/read at call time, so there is no resource re-sync to maintain.
+- **Prompts** → one slash command per prompt, registered only when the server declares the `prompts` capability and a command adapter is composed: `/mcp-<serverName>-<promptName>` (lowercased, sanitized). The command takes JSON arguments (e.g. `{"file":"src/index.ts"}`), fills the prompt through `prompts/get`, and steers its text into the model as the next turn.
 
 ## Model Experience
 
@@ -108,8 +117,6 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 ## Known Limitations and Deferred Work
 
-- **Tools are the only bridged MCP capability** — Resources and Prompts have no harness consumer and are deferred.
-- **Startup timeout is inherited from the MCP SDK** — DSH does not yet expose a connection/discovery timeout. Each initialize or paginated `tools/list` request uses the SDK's 60-second default, so an unresponsive server or cursor chain can delay both activation and teardown while the initial synchronization settles.
 - **Reconnect triggers on transport close** — a crashed stdio child fires it; Streamable HTTP failures surface per request and through the SDK transport's own SSE-stream recovery, so an unreachable HTTP server is retried per call rather than respawned by the supervisor.
 - **Native non-text rendering is lossy** — image, audio, and resource payloads become placeholders in model context even though the execution-local canonical value preserves their JSON blocks. Richer Native multimedia projection is deferred.
 - **Unsupported MCP output schemas are not enforced** — `structuredContent` falls back to `JsonValue` when the advertised schema uses vocabulary outside the harness subset.

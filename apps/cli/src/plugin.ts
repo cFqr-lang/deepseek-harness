@@ -111,6 +111,12 @@ function anchorPathSpec(argument: string, cwd: string): string {
   return `${prefix}${resolve(cwd, match.groups.path)}`
 }
 
+/** Quote an argv element so cmd.exe (shell:true) forwards it as one token. */
+function quoteForShell(argument: string): string {
+  if (!/[ \t"&|<>^()]/.test(argument)) return argument
+  return `"${argument.replace(/"/g, '""')}"`
+}
+
 /**
  * Run one `dsh plugin` invocation: init if needed, forward to pnpm, reconcile.
  * @param profile - the profile name.
@@ -125,8 +131,11 @@ export function runPlugin(profile: string, args: readonly string[]): number {
   }
   const before = readProfileManifest(NAME, dir)
   // Windows resolves pnpm through its .cmd shim, which spawn() refuses
-  // without a shell since the CVE-2024-27980 hardening.
-  const result = spawnSync('pnpm', args.map(argument => anchorPathSpec(argument, process.cwd())), {
+  // without a shell since the CVE-2024-27980 hardening. shell:true joins argv
+  // verbatim, so quote arguments cmd.exe would otherwise split or interpret
+  // (spaces, &, |, <, >, ^, parentheses) before forwarding them.
+  const anchored = args.map(argument => anchorPathSpec(argument, process.cwd()))
+  const result = spawnSync('pnpm', process.platform === 'win32' ? anchored.map(quoteForShell) : anchored, {
     cwd: dir,
     stdio: 'inherit',
     shell: process.platform === 'win32',

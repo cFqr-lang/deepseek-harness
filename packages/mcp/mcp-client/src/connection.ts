@@ -16,12 +16,15 @@
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
+import { PromptListChangedNotificationSchema, ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { createTransport } from './transport.ts'
 import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
+import { syncPrompts } from './prompts.ts'
+import type { PromptDisposers } from './prompts.ts'
+import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
 import type { Config } from './index.ts'
 
 /** Automatic reconnect policy for one MCP server connection. */
@@ -120,12 +123,18 @@ export interface ConnectionHandle {
  * @param policy - Resolved reconnect policy from {@link resolveReconnectPolicy}.
  * @returns Handle with a `ready` promise for startup-await and a `dispose` for teardown.
  */
-export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
+export function startConnection(
+  ctx: Context,
+  config: Config,
+  policy: ResolvedReconnectPolicy,
+  commands: CommandRuntime | undefined,
+): ConnectionHandle {
   const label = `mcp-client(${config.serverName})`
   const opts: ToolBridgeOptions = {
     registrationFailure: 'contain',
     serverName: config.serverName,
     toolCallTimeoutMs: config.toolCallTimeoutMs,
+    connectTimeoutMs: config.connectTimeoutMs,
   }
   // The initial sync uses 'throw' when failOnStartupError is configured, so
   // a registration conflict propagates to the startup-await path. Re-syncs
@@ -141,6 +150,8 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   let clientClosed: Promise<void> | undefined
   /** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
   let disposers: ToolDisposers = new Map()
+  /** Live prompt-command registrations; swapped by {@link enqueueSync} and dispose. */
+  let promptDisposers: PromptDisposers = new Map()
   let reconnectTimer: NodeJS.Timeout | undefined
   /** Consecutive failed connection attempts within the current outage. */
   let failedAttempts = 0
@@ -163,6 +174,9 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     const run = syncChain.then(async () => {
       if (!isCurrent(generation)) return
       disposers = await syncTools(generation, ctx, syncOpts, disposers)
+      if (commands !== undefined && generation.getServerCapabilities()?.prompts !== undefined) {
+        promptDisposers = await syncPrompts(commands, generation, syncOpts, promptDisposers)
+      }
     })
     // The chain tail must survive a failed sync; the enqueuing caller owns reporting.
     syncChain = run.catch(() => {})
@@ -268,8 +282,20 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         }
       },
     )
+    generation.setNotificationHandler(
+      PromptListChangedNotificationSchema,
+      async () => {
+        if (!isCurrent(generation)) return
+        ctx.logger.info(`${label}: prompt list changed, re-syncing`)
+        try {
+          await enqueueSync(generation)
+        } catch (error) {
+          if (!disposed) ctx.logger.error(`${label}: prompt re-sync failed: ${String(error)}`)
+        }
+      },
+    )
     try {
-      await generation.connect(createTransport(config))
+      await generation.connect(createTransport(config), { timeout: config.connectTimeoutMs })
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)
@@ -346,6 +372,8 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       await syncChain
       for (const dispose of disposers.values()) dispose()
       disposers = new Map()
+      for (const dispose of promptDisposers.values()) dispose()
+      promptDisposers = new Map()
     },
   }
 }

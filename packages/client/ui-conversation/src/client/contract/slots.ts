@@ -634,9 +634,9 @@ export class PendingApproval {
    * Deliver the user's decision; a rejected carrier receipt throws. Panel
    * removal stays frame-driven: the broadcast `approval/resolved` settles the
    * wait and drops it from the pending list.
-   * @param outcome - the only two client-answerable outcomes.
+   * @param outcome - the client-answerable outcomes.
    */
-  async answer(outcome: 'allowed-once' | 'rejected'): Promise<void> {
+  async answer(outcome: 'allowed-once' | 'allowed-always' | 'rejected'): Promise<void> {
     const receipt = await this.wait.respond({
       ok: true,
       value: { sessionId: this.wait.sessionId, approvalId: this.wait.payload.approvalId, outcome },
