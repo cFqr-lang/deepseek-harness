@@ -160,7 +160,7 @@ Source: [`packages/preset/agent-presets/src/session.ts:26`](../packages/preset/a
 
 Types: [CallId](subsystems/core.md)
 
-Source: [`packages/interaction/user-approval/src/index.ts:44`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/index.ts:45`](../packages/interaction/user-approval/src/index.ts)
 
 <a id="approvaldecided--log-only"></a>
 
@@ -178,7 +178,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:44`](../packages/inter
 }
 ```
 
-Source: [`packages/interaction/user-approval/src/index.ts:55`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/index.ts:56`](../packages/interaction/user-approval/src/index.ts)
 
 <a id="approvalpolicy--log-only"></a>
 
@@ -200,7 +200,27 @@ Source: [`packages/interaction/user-approval/src/index.ts:55`](../packages/inter
 }
 ```
 
-Source: [`packages/interaction/user-approval/src/index.ts:67`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/index.ts:68`](../packages/interaction/user-approval/src/index.ts)
+
+<a id="approvalrule--log-only"></a>
+
+#### `approval/rule` — log-only
+
+```ts persistence-catalog
+/**
+ * A persistent per-(tool, reason) approval rule was set or revoked —
+ * log-only, durable, replayable. A later `'revoke'` cancels an earlier
+ * `'allowed-always'` for the same tool and reason. The fold over these
+ * events is the session's effective rule set ({@link effectiveApprovalRules}).
+ */
+'approval/rule': {
+  toolName: string
+  reason?: string
+  action: 'allowed-always' | 'revoke'
+}
+```
+
+Source: [`packages/interaction/user-approval/src/index.ts:79`](../packages/interaction/user-approval/src/index.ts)
 
 ### `assistant/*`
 
