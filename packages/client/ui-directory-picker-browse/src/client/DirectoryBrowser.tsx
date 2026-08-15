@@ -105,7 +105,11 @@ function displayCrumbs(listing: DirectoryListing, homeLabel: string): DirectoryE
   const homeIndex = listing.crumbs.findIndex(crumb => crumb.path === listing.home)
   if (homeIndex === -1) return listing.crumbs
   const tail = listing.crumbs.slice(homeIndex + 1)
-  return [{ name: homeLabel, path: listing.home, hidden: false }, ...tail]
+  const home = { name: homeLabel, path: listing.home, hidden: false }
+  // Always keep the root crumb (e.g. '/') so a mouse click can return to the
+  // filesystem root and reach mount points like /mnt/f.
+  const root = listing.crumbs[0]
+  return homeIndex === 0 || root === undefined ? [home, ...tail] : [root, home, ...tail]
 }
 
 /**
