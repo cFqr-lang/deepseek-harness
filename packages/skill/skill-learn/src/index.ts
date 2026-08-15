@@ -23,7 +23,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** Cordis service name. */
-export const name = 'skill-learn'
+export const name = 'skillLearn'
 
 /** Skill-name slug: lowercase letters, digits, dashes. */
 const NAME_PATTERN = /^[a-z0-9-]{1,64}$/
@@ -52,7 +52,7 @@ export class SkillLearnService extends Service {
   readonly root: string
 
   constructor(ctx: Context, public config: Config) {
-    super(ctx, 'skill-learn')
+    super(ctx, 'skillLearn')
     this.root = config.root ?? dshHomePath('skills')
     mkdirSync(this.root, { recursive: true })
 

@@ -40,7 +40,7 @@ const REFLECT_PROMPT =
   + 'Use [] for an empty array. If nothing is worth saving, output {"memories": [], "skills": []}.'
 
 /** Extract the first JSON object from a model reply, tolerating markdown fences and surrounding prose. */
-function extractJson(text: string): unknown {
+export function extractJson(text: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text)
   const candidate = fenced?.[1] ?? text
   const start = candidate.indexOf('{')

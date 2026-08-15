@@ -55,7 +55,7 @@ export interface Config {
 }
 
 /** Parse `every <N>m` / `every <N>h` into milliseconds; undefined when malformed. */
-function parseInterval(input: string | undefined): number | undefined {
+export function parseInterval(input: string | undefined): number | undefined {
   if (input === undefined) return undefined
   const match = /^every\s+(\d+)([mh])$/.exec(input)
   if (match === null) return undefined
@@ -64,7 +64,7 @@ function parseInterval(input: string | undefined): number | undefined {
 }
 
 /** Human-readable recurrence for a task (assumes a whole-minute/hour interval). */
-function renderInterval(intervalMs: number): string {
+export function renderInterval(intervalMs: number): string {
   if (intervalMs % 3_600_000 === 0) return `every ${intervalMs / 3_600_000}h`
   return `every ${intervalMs / 60_000}m`
 }

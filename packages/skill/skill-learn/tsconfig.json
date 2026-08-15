@@ -20,6 +20,9 @@
     },
     {
       "path": "../../interaction/commands"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
     }
   ]
 }
