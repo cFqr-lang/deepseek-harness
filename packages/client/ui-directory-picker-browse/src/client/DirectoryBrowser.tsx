@@ -101,15 +101,15 @@ const DRAFT_PREVIEW_DEBOUNCE_MS = 250
  * localized Home crumb; outside it the full ancestry shows, the root labeled
  * by its own path.
  */
-function displayCrumbs(listing: DirectoryListing, homeLabel: string): DirectoryEntry[] {
+function displayCrumbs(listing: DirectoryListing, homeLabel: string, disksLabel = ''): DirectoryEntry[] {
   const homeIndex = listing.crumbs.findIndex(crumb => crumb.path === listing.home)
   if (homeIndex === -1) return listing.crumbs
   const tail = listing.crumbs.slice(homeIndex + 1)
   const home = { name: homeLabel, path: listing.home, hidden: false }
-  // Always keep the root crumb (e.g. '/') so a mouse click can return to the
-  // filesystem root and reach mount points like /mnt/f.
-  const root = listing.crumbs[0]
-  return homeIndex === 0 || root === undefined ? [home, ...tail] : [root, home, ...tail]
+  // A "disks" crumb pointing at /mnt (where Windows drives are mounted), so a
+  // mouse click jumps straight to the drive list instead of the Linux root.
+  const disks = { name: disksLabel, path: '/mnt', hidden: false }
+  return homeIndex === 0 ? [home, ...tail] : [disks, home, ...tail]
 }
 
 /**
@@ -596,7 +596,7 @@ export function DirectoryBrowser({ open, listDirectory, createDirectory, onOpen,
   /** The folder a create or Open acts on: the selection, else the listed level. */
   const targetPath = selected?.path ?? parent?.path ?? null
   const targetName = selected?.name
-    ?? (parent === null ? '' : (displayCrumbs(parent, t('browser.home')).at(-1)?.name ?? parent.path))
+    ?? (parent === null ? '' : (displayCrumbs(parent, t('browser.home'), t('browser.disks')).at(-1)?.name ?? parent.path))
 
   const confirmCreate = (): void => {
     /* v8 ignore next -- reentry fence: the nested dialog only renders with a target and disables while creating. */
@@ -689,7 +689,7 @@ export function DirectoryBrowser({ open, listDirectory, createDirectory, onOpen,
   const typedPrefix = crumbSource === null || pathDraft === null
     ? null
     : readDraft(crumbSource, pathDraft, scanned.current).tail
-  const crumbs = crumbSource === null ? [] : displayCrumbs(crumbSource, t('browser.home'))
+  const crumbs = crumbSource === null ? [] : displayCrumbs(crumbSource, t('browser.home'), t('browser.disks'))
   const crumbTail = crumbs.at(-1)?.path
   useEffect(() => {
     const trail = crumbTrailRef.current
