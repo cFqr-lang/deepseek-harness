@@ -119,7 +119,9 @@
     "@deepseek-ai/dsh-memory": "workspace:^",
     "@deepseek-ai/dsh-cron": "workspace:^",
     "@deepseek-ai/dsh-skill-learn": "workspace:^",
-    "@deepseek-ai/dsh-curator": "workspace:^"
+    "@deepseek-ai/dsh-curator": "workspace:^",
+    "@deepseek-ai/dsh-profile": "workspace:^",
+    "@deepseek-ai/dsh-tool-session-query": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

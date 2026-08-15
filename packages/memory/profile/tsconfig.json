@@ -13,22 +13,16 @@
       "path": "../../../vendor/schemastery"
     },
     {
-      "path": "../../llm/llm"
+      "path": "../../util/home-paths"
     },
     {
-      "path": "../../memory/memory"
+      "path": "../../core/system-prompt"
     },
     {
-      "path": "../../memory/profile"
+      "path": "../../core/tools"
     },
     {
-      "path": "../../skill/skill-learn"
-    },
-    {
-      "path": "../../core/agent"
-    },
-    {
-      "path": "../../core/session"
+      "path": "../../interaction/commands"
     },
     {
       "path": "../../runtime-diagnostics/invariants"

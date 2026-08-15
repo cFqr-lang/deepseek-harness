@@ -120,6 +120,9 @@
         path: ':memory:'
         openAt: never
 
+    - id: tool-session-query
+      name: '@deepseek-ai/dsh-tool-session-query'
+
     # Shared projection registry: subagent catalog identity (mode/label) folds
     # through its registered units, so the `list_agents` surface below fails
     # loud without it; web layers reuse this same mount for list rows.
@@ -233,6 +236,9 @@
       name: '@deepseek-ai/dsh-agent-instructions'
       config:
         maxBytes: 65536
+
+    - id: profile
+      name: '@deepseek-ai/dsh-profile'
 
     - id: memory
       name: '@deepseek-ai/dsh-memory'

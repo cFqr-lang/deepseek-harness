@@ -21,6 +21,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 // Side-effect type imports: declaration-merge `ctx.agents`/`ctx.llm`/`ctx.memory`.
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-memory'
+import type {} from '@deepseek-ai/dsh-profile'
 import type {} from '@deepseek-ai/dsh-skill-learn'
 
 declare module '@deepseek-ai/cordis' {
@@ -36,8 +37,9 @@ export const name = 'curator'
 const REFLECT_PROMPT =
   'Reflect on the conversation above. Output a single JSON object (and nothing else) of the form '
   + '{"memories": ["a fact or preference about the user worth remembering", ...], '
-  + '"skills": [{"name": "class-level-slug", "description": "one line", "content": "step-by-step instructions"}, ...]}. '
-  + 'Use [] for an empty array. If nothing is worth saving, output {"memories": [], "skills": []}.'
+  + '"skills": [{"name": "class-level-slug", "description": "one line", "content": "step-by-step instructions"}, ...], '
+  + '"profile": "the full updated user profile as markdown"}. '
+  + 'Use [] for an empty array and "" for an unchanged profile. If nothing is worth saving, output {"memories": [], "skills": [], "profile": ""}.'
 
 /** Extract the first JSON object from a model reply, tolerating markdown fences and surrounding prose. */
 export function extractJson(text: string): unknown {
@@ -118,7 +120,7 @@ export class CuratorService extends Service {
   /** Persist a parsed reflection: write each memory and each skill (best-effort). */
   private applyReflection(parsed: unknown): void {
     if (typeof parsed !== 'object' || parsed === null) return
-    const { memories, skills } = parsed as { memories?: unknown; skills?: unknown }
+    const { memories, skills, profile } = parsed as { memories?: unknown; skills?: unknown; profile?: unknown }
     if (Array.isArray(memories)) {
       for (const memory of memories) {
         if (typeof memory === 'string' && memory.trim() !== '') {
@@ -136,6 +138,9 @@ export class CuratorService extends Service {
         }
       }
     }
+    if (typeof profile === 'string' && profile.trim() !== '') {
+      this.ctx.profile.update(profile.trim())
+    }
   }
 
   /** Run one background reflection and persist its structured output (best-effort). */
@@ -144,10 +149,14 @@ export class CuratorService extends Service {
       const target = this.resolveTarget(agent)
       if (target === undefined) return
       const assembler = new BlockAssembler()
+      const existingProfile = this.ctx.profile.read().trim()
+      const profileHint = existingProfile === ''
+        ? 'No user profile exists yet; create one from the conversation, organized under these headings: 身份 / 偏好 / 目标 / 技术栈 / 协作方式 / Agent 人格.'
+        : `Current user profile:\n${existingProfile}\n\nMerge the conversation's new observations into it dialectically — keep what holds, refine what changed, resolve contradictions, drop nothing important.`
       const messages: Message[] = [
         ...agent.session.deriveMessages(),
         createUserMessage({
-          content: [{ type: 'text', text: REFLECT_PROMPT }],
+          content: [{ type: 'text', text: `${profileHint}\n\n${REFLECT_PROMPT}` }],
           source: { kind: 'plugin', plugin: 'curator' },
         }),
       ]
