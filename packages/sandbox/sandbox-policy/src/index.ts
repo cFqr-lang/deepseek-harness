@@ -51,6 +51,18 @@ function renderPolicyContext(policy: SandboxExecutionPolicy): string {
   }
 }
 
+/** Render a one-line platform fact so the model never tries a foreign OS's binaries. */
+function renderPlatformContext(): string {
+  switch (process.platform) {
+    case 'win32':
+      return 'You are running on Windows. Use PowerShell (pwsh) for command execution; bash is not available natively.'
+    case 'darwin':
+      return 'You are running on macOS. Use bash or zsh for command execution.'
+    default:
+      return 'You are running on Linux. Windows drives (under WSL) are mounted at /mnt/<letter> (e.g. /mnt/c, /mnt/e, /mnt/f). Use bash for command execution; Windows binaries (.exe, .ps1, .cmd) cannot run here. Operations that require the Windows host itself (such as refreshing the icon cache, editing the registry, or launching GUI apps) must be performed by the user on the Windows side.'
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sandboxPolicy: SandboxPolicyService
@@ -110,6 +122,12 @@ export class SandboxPolicyService extends Service {
     this.workspaceRoot = resolveWorkspaceRoot(config.workspaceRoot ?? process.cwd())
 
     ctx.inject(['systemPrompt'], (scope: Context) => {
+      scope.systemPrompt.section({
+        name: 'platform',
+        order: 105,
+        text: () => renderPlatformContext(),
+      })
+
       scope.systemPrompt.context({
         name: 'sandbox:policy',
         order: 110,
