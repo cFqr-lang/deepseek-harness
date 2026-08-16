@@ -77,6 +77,10 @@ export class CuratorService extends Service {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'curator')
+    // Declare the services the reflection path reads directly, so the deferred
+    // timer callback and `reflect()` can access them without the "without inject"
+    // proxy guard rejecting the access.
+    ctx.inject(['agents', 'llm', 'memory', 'skillLearn', 'profile'], () => {})
     const idleMinutes = config.idleMinutes ?? 30
     let lastTurnEndAt = Date.now()
     let lastAgentId: SessionId | undefined

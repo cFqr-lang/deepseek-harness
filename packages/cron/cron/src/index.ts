@@ -84,6 +84,9 @@ export class CronService extends Service {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'cron')
+    // `checkDue()` reads `ctx.agents` directly; declare the dependency so the
+    // proxy guard does not reject the deferred access.
+    ctx.inject(['agents'], () => {})
     this.root = config.root ?? dshHomePath('cron')
     mkdirSync(this.root, { recursive: true })
     this.tasksFile = join(this.root, 'tasks.json')
