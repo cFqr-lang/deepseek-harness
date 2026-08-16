@@ -130,9 +130,9 @@ function imageReadContent(value: ImageReadValue): ContentBlock[] {
 export function applyReadImageTool(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'read_image',
-    description: 'Read a PNG/JPEG/WebP/GIF file and return the image itself. Requires the current model to accept image input.',
+    description: 'Read a PNG/JPEG/WebP/GIF file from the filesystem (a real path ending in .png/.jpg/.jpeg/.webp/.gif) and return the image itself. Requires the current model to accept image input. Do NOT call this on attachment storage paths (content-hash paths without an extension): images pasted or dropped into the chat are already analyzed automatically and their content is already in the conversation context.',
     parameters: {
-      file_path: { type: 'string', required: true, description: 'Path to the image file, resolved by the filesystem backend.' },
+      file_path: { type: 'string', required: true, description: 'Path to the image file on disk, ending in .png/.jpg/.jpeg/.webp/.gif. Attachment storage paths (no extension) are not accepted.' },
     },
     output: {
       schema: {
