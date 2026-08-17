@@ -84,9 +84,6 @@ export class CronService extends Service {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'cron')
-    // `checkDue()` reads `ctx.agents` directly; declare the dependency so the
-    // proxy guard does not reject the deferred access.
-    ctx.inject(['agents'], () => {})
     this.root = config.root ?? dshHomePath('cron')
     mkdirSync(this.root, { recursive: true })
     this.tasksFile = join(this.root, 'tasks.json')
@@ -163,7 +160,7 @@ export class CronService extends Service {
     const tasks = this.loadTasks()
     for (const task of tasks) {
       if (now - task.lastRunAt < task.intervalMs) continue
-      const agent = this.ctx.agents.get(task.agentId as SessionId)
+      const agent = this.ctx.get('agents')?.get(task.agentId as SessionId)
       if (agent !== undefined) {
         agent.steer(createUserMessage({
           content: [{ type: 'text', text: `[scheduled task] ${task.prompt}` }],

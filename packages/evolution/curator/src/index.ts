@@ -77,10 +77,6 @@ export class CuratorService extends Service {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'curator')
-    // Declare the services the reflection path reads directly, so the deferred
-    // timer callback and `reflect()` can access them without the "without inject"
-    // proxy guard rejecting the access.
-    ctx.inject(['agents', 'llm', 'memory', 'skillLearn', 'profile'], () => {})
     const idleMinutes = config.idleMinutes ?? 30
     let lastTurnEndAt = Date.now()
     let lastAgentId: SessionId | undefined
@@ -96,7 +92,7 @@ export class CuratorService extends Service {
         if (config.enabled === false) return
         if (lastAgentId === undefined) return
         if (Date.now() - lastTurnEndAt < idleMinutes * 60_000) return
-        const agent = ctx.agents.get(lastAgentId)
+        const agent = ctx.get('agents')?.get(lastAgentId)
         if (agent === undefined) return
         // Fire once per idle window: advance the clock so we do not re-fire until the next turn.
         lastTurnEndAt = Date.now()
@@ -128,7 +124,7 @@ export class CuratorService extends Service {
     if (Array.isArray(memories)) {
       for (const memory of memories) {
         if (typeof memory === 'string' && memory.trim() !== '') {
-          this.ctx.memory.remember(memory.trim())
+          this.ctx.get('memory')?.remember(memory.trim())
         }
       }
     }
@@ -138,12 +134,12 @@ export class CuratorService extends Service {
         const { name, description, content } = skill as { name?: unknown; description?: unknown; content?: unknown }
         if (typeof name === 'string' && typeof description === 'string' && typeof content === 'string'
           && name !== '' && description !== '' && content !== '') {
-          this.ctx.skillLearn.writeSkill(name, description, content)
+          this.ctx.get('skillLearn')?.writeSkill(name, description, content)
         }
       }
     }
     if (typeof profile === 'string' && profile.trim() !== '') {
-      this.ctx.profile.update(profile.trim())
+      this.ctx.get('profile')?.update(profile.trim())
     }
   }
 
@@ -153,7 +149,7 @@ export class CuratorService extends Service {
       const target = this.resolveTarget(agent)
       if (target === undefined) return
       const assembler = new BlockAssembler()
-      const existingProfile = this.ctx.profile.read().trim()
+      const existingProfile = this.ctx.get('profile')?.read().trim() ?? ''
       const profileHint = existingProfile === ''
         ? 'No user profile exists yet; create one from the conversation, organized under these headings: 身份 / 偏好 / 目标 / 技术栈 / 协作方式 / Agent 人格.'
         : `Current user profile:\n${existingProfile}\n\nMerge the conversation's new observations into it dialectically — keep what holds, refine what changed, resolve contradictions, drop nothing important.`
@@ -170,7 +166,9 @@ export class CuratorService extends Service {
         messages,
         sessionId: agent.session.id,
       }
-      for await (const chunk of this.ctx.llm.stream(options)) assembler.push(chunk)
+      const llm = this.ctx.get('llm')
+      if (llm === undefined) return
+      for await (const chunk of llm.stream(options)) assembler.push(chunk)
       if (assembler.finish.kind === 'error' || assembler.finish.kind === 'aborted') return
       const text = assembler.blocks()
         .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
