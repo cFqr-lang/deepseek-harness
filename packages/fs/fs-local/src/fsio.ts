@@ -36,6 +36,28 @@ function isENOTDIR(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOTDIR'
 }
 
+/**
+ * Errno set indicating the filesystem itself cannot create hard links, as
+ * opposed to a collision (EEXIST) or a permission/observation problem on the
+ * target. 9p/drvfs mounts (WSL's `/mnt/<drive>`), some network filesystems and
+ * a few container filesystems return EPERM/ENOTSUP/EOPNOTSUPP/ENOSYS (or the
+ * legacy EINVAL/ENOTTY) for `link(2)` even when the directory is writable.
+ */
+function isUnsupportedLinkError(error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error)) return false
+  switch (error.code) {
+    case 'EPERM':
+    case 'ENOTSUP':
+    case 'EOPNOTSUPP':
+    case 'ENOSYS':
+    case 'EINVAL':
+    case 'ENOTTY':
+      return true
+    default:
+      return false
+  }
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
@@ -478,6 +500,27 @@ async function removeStagingDirOrThrow(
   throw originalError
 }
 
+/**
+ * Whether a failed hard-link publish should degrade to rename: the errno says
+ * the filesystem cannot create hard links at all, and the destination is truly
+ * absent (so no concurrent creator's file would be clobbered by rename). Any
+ * other failure keeps the strict no-replace semantics of
+ * {@link throwGuardedCreateFailure}.
+ */
+async function isLinkUnsupportedWithAbsentTarget(
+  error: unknown,
+  absolutePath: string,
+  inspectPublicationTarget: (path: string) => Promise<BigIntStats>,
+): Promise<boolean> {
+  if (!isUnsupportedLinkError(error)) return false
+  try {
+    await inspectPublicationTarget(absolutePath)
+    return false // destination exists — treat as a collision, keep the strict path
+  } catch (metadataError: unknown) {
+    return isENOENT(metadataError) || isENOTDIR(metadataError)
+  }
+}
+
 async function throwGuardedCreateFailure(
   error: unknown,
   absolutePath: string,
@@ -579,7 +622,17 @@ export async function writeFileAtomic(
       try {
         await linkFile(tempPath, absolutePath)
       } catch (error: unknown) {
-        await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        // The filesystem may not support hard links at all (9p/drvfs on WSL's
+        // /mnt/<drive>, some network/container filesystems). When the target is
+        // genuinely absent — not a concurrent-creator collision — degrade to
+        // rename, which every filesystem supports. Only the errno set from
+        // `isUnsupportedLinkError` triggers the probe; EEXIST and friends keep
+        // the strict no-replace failure path below.
+        if (await isLinkUnsupportedWithAbsentTarget(error, absolutePath, inspectPublicationTarget)) {
+          await rename(tempPath, absolutePath)
+        } else {
+          await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        }
       }
     } else if (platform === 'win32' && mode !== undefined) {
       try {
