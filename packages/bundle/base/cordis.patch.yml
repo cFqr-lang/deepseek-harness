@@ -221,6 +221,9 @@
     - id: tool-jobs
       name: '@deepseek-ai/dsh-tool-jobs'
 
+    - id: tool-effort-switch
+      name: '@deepseek-ai/dsh-tool-effort-switch'
+
     - id: fs-observation-policy
       name: '@deepseek-ai/dsh-fs-observation-policy'
 
