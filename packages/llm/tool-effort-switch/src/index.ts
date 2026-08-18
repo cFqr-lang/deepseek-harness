@@ -1,0 +1,69 @@
+/**
+ * Model-facing `set_reasoning_effort` tool: switch the current session's
+ * reasoning effort (off / low / high) for subsequent requests. This lets the
+ * agent adapt thinking strength per task — mechanical/batch work can run with
+ * reasoning off, complex analysis with high — while `max` stays manual-only.
+ *
+ * The switch appends a `request/header` event, so it takes effect from the
+ * next request in this session and never touches the global default or other
+ * sessions.
+ *
+ * @module @deepseek-ai/dsh-tool-effort-switch
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+
+export const name = 'tool-effort-switch'
+export const inject = ['tools']
+
+/** Automatic tiers only; `max` is intentionally excluded (manual-only). */
+const EFFORT_LEVELS = ['off', 'low', 'high'] as const
+
+export function apply(ctx: Context): void {
+  ctx.tools.register(defineTool({
+    name: 'set_reasoning_effort',
+    description: 'Switch the current session\'s reasoning effort (thinking strength) for subsequent model requests. '
+      + 'Use off for mechanical or batch tasks that need no reasoning, low for simple tasks, high for complex analysis or debugging. '
+      + 'Takes effect from the next request in this session; provider and model are unchanged. '
+      + 'max is manual-only and intentionally not offered here.',
+    parameters: {
+      effort: {
+        type: 'string',
+        required: true,
+        enum: [...EFFORT_LEVELS],
+        description: 'Target reasoning effort: off / low / high. max is not available here.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text }],
+    },
+    async execute(args, exec) {
+      const session = exec.agent?.session
+      if (session === undefined) {
+        throw new Error('no agent session available to switch reasoning effort')
+      }
+      const header = session.requestHeader()
+      const config = header?.config
+      if (config === undefined) {
+        throw new Error('no request header available to switch reasoning effort')
+      }
+      session.append('request/header', {
+        header: {
+          config: { ...config, reasoningEffort: ReasoningEffortId(args.effort) },
+          ...(header?.adapterDefaults === undefined ? {} : { adapterDefaults: header.adapterDefaults }),
+        },
+        reason: 'change',
+      })
+      return { text: `Reasoning effort set to "${args.effort}" for subsequent requests in this session.` }
+    },
+  }))
+}

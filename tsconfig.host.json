@@ -127,6 +127,7 @@
     { "path": "./packages/attachment/attachment-local" },
     { "path": "./packages/llm/llm" },
     { "path": "./packages/llm/token-meter" },
+    { "path": "./packages/llm/tool-effort-switch" },
     { "path": "./packages/memory/memory" },
     { "path": "./packages/memory/profile" },
     { "path": "./packages/cron/cron" },
